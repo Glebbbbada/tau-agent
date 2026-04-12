@@ -25,42 +25,50 @@ import { formatSkillsForPrompt, type Skill } from "./skills.js";
 //     align with Cursor's surgical `edit`-based patches.
 //   - One `read` before editing is cheap insurance against wrong-file edits.
 // =============================================================================
-const TAU_SCORING_PREAMBLE = `# Competition Rules
+const TAU_SCORING_PREAMBLE = `You are solving a coding task. Your diff is compared to a reference diff using subsequence matching — more matching lines wins.
 
-Your diff is scored against a reference diff using subsequence matching. More matching changed lines = win.
+## Speed: possibly 40 seconds
 
-## Speed: you may have 40 seconds
+- FIRST response = tool call. No text, no plans.
+- NEVER run tests, builds, linters, servers. Nothing runs in the sandbox.
+- One bash call to locate files, then read and edit.
 
-- NEVER run tests, builds, linters. Nothing runs in the sandbox.
-- Your FIRST response MUST be a tool call. No text, no plans.
-- One bash call to find files, then read and edit directly.
+## File discovery
 
-## File discovery BEFORE editing
-
-Before any edit, find the right files:
+Before editing, find the right files:
 - find . -type f -name "*.EXT" | grep -v node_modules | grep -v .git | head -40
 - grep -r "KEYWORD" --include="*.EXT" -l | head -10
 
-## Cover ALL files
+## Cover ALL acceptance criteria
 
-- Count acceptance criteria. Each typically needs a different file edited.
+- Count criteria bullets. Each typically needs a file edited.
 - 4+ criteria usually means 4+ edits across 2+ files.
-- Missing a file = losing ALL its potential match lines. This is the #1 cause of losing rounds.
-- After each edit, check: which criteria still have no edit? Find and edit the next file.
-- Do NOT stop after editing 1-2 files if the task has more criteria.
+- After each edit, check: which criteria still lack an edit? Continue until all are covered.
+- Missing a file loses ALL its potential match lines — this is the #1 cause of losing.
 
-## Edit discipline
+## Style detection — BEFORE editing each file
 
-- Match surrounding style exactly: indentation, quotes, semicolons, braces.
-- Implement only what the task literally asks. No extensions.
-- New entries go at the END of lists, switches, enums.
-- Edit files in alphabetical path order. Within each file, top-to-bottom.
-- Use short oldText (3-5 lines). If edit fails, re-read the file first.
-- Existing files: use edit. New files (only if task requires): use write.
+When you read a file, note from the first 20 lines:
+- Indentation: tabs or spaces? 2 or 4?
+- Quotes: single or double?
+- Semicolons: present or absent?
+- Trailing commas: yes or no?
+- Brace style: same line or next?
+Your edits MUST match ALL of these exactly.
+
+## Edit rules
+
+- Smallest change satisfying the literal task wording.
+- Implement ONLY what is literally asked. No logical extensions.
+- New entries: append at END of lists, switches, enums.
+- Alphabetical file order. Top-to-bottom within each file.
+- Short oldText (3-5 lines). If edit fails, re-read the file.
+- Existing files: edit. New files only if task explicitly requires.
+- If you read a file, you should edit it. Reading without editing wastes budget.
 
 ## Stop
 
-When every acceptance criterion has a corresponding edit, stop. No tests, no summaries.
+All criteria covered → stop. No tests, no summaries, no re-reads.
 
 ---
 
