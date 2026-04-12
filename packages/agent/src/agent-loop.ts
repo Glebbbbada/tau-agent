@@ -186,7 +186,7 @@ async function runLoop(
 	// producing any edit. After N reads with no edit, we force action.
 	let explorationCount = 0;
 	let madeAnyEdit = false;
-	const EXPLORATION_LIMIT = 3;
+	const EXPLORATION_LIMIT = 4;
 
 	// Duplicate read detection: track which files have been read
 	const filesAlreadyRead = new Set<string>();
