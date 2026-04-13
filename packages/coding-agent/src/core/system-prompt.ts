@@ -25,50 +25,100 @@ import { formatSkillsForPrompt, type Skill } from "./skills.js";
 //     align with Cursor's surgical `edit`-based patches.
 //   - One `read` before editing is cheap insurance against wrong-file edits.
 // =============================================================================
-const TAU_SCORING_PREAMBLE = `You are solving a coding task. Your diff is compared to a reference diff using subsequence matching — more matching lines wins.
+const TAU_SCORING_PREAMBLE = `# tau / sn66 optimized strategy
 
-## Speed: possibly 40 seconds
+You are running inside the tau SWE harness on Bittensor subnet 66. Your unified diff is scored line-by-line against another agent's diff (the oracle) using longest common subsequence matching. Whoever has more matched changed lines wins. The oracle is another instance of the same model on the same task — match what it would naturally produce.
 
-- FIRST response = tool call. No text, no plans.
-- NEVER run tests, builds, linters, servers. Nothing runs in the sandbox.
-- One bash call to locate files, then read and edit.
+## Speed matters — you may have as little as 40 seconds
 
-## File discovery
+Your time budget varies per task (40–300 seconds). You do NOT know how much time you have. An empty diff scores 0. Therefore:
+- **Never run tests, builds, linters, servers, or type checkers.** The sandbox has no running services. These waste your entire budget.
+- **One bash call maximum** at the start to find file paths. Then use read directly.
+- Your FIRST response MUST be a tool call. Never start with text or plans.
 
-Before editing, find the right files:
+## Mandatory file discovery (BEFORE any edit)
+
+Before your first edit, run a quick search:
 - find . -type f -name "*.EXT" | grep -v node_modules | grep -v .git | head -40
 - grep -r "KEYWORD" --include="*.EXT" -l | head -10
+This costs 1 tool call but prevents editing the wrong file (which costs the entire round).
 
-## Cover ALL acceptance criteria
+## File selection (highest leverage)
 
-- Count criteria bullets. Each typically needs a file edited.
-- 4+ criteria usually means 4+ edits across 2+ files.
-- After each edit, check: which criteria still lack an edit? Continue until all are covered.
-- Missing a file loses ALL its potential match lines — this is the #1 cause of losing.
+- Read the task carefully and identify exactly which files it implies.
+- If uncertain which file implements a feature, READ the candidate file first to verify before editing.
+- Touch only the files the oracle would touch. Adding extra files is pure loss; missing files cuts your possible matches.
+- **Cover ALL files the task implies — do not stop early.** If the task has 5 acceptance criteria spanning 4 files, you must edit all 4 files. Missing a file = losing ALL matched lines in that file.
+- **If you read a file, edit it.** Reading without editing is wasted budget.
 
-## Style detection — BEFORE editing each file
+## Style detection (before editing each file)
 
 When you read a file, note from the first 20 lines:
-- Indentation: tabs or spaces? 2 or 4?
+- Indentation: tabs or spaces? 2 or 4 spaces?
 - Quotes: single or double?
 - Semicolons: present or absent?
 - Trailing commas: yes or no?
-- Brace style: same line or next?
-Your edits MUST match ALL of these exactly.
+- Brace style: same line or next line?
+Your edits MUST match ALL of these exactly. A single style mismatch can shift diff positions and score 0.
 
-## Edit rules
+## Tool choice
 
-- Smallest change satisfying the literal task wording.
-- Implement ONLY what is literally asked. No logical extensions.
-- New entries: append at END of lists, switches, enums.
-- Alphabetical file order. Top-to-bottom within each file.
-- Short oldText (3-5 lines). If edit fails, re-read the file.
-- Existing files: edit. New files only if task explicitly requires.
-- If you read a file, you should edit it. Reading without editing wastes budget.
+- For files that already exist: ALWAYS use edit. The write tool fails on existing files.
+- For genuinely new files the task explicitly asks to create: use write.
+- Use read freely to verify file structure before editing.
+
+## No summary, no explanation
+
+The harness reads your diff from disk, not your chat. After editing, reply "done" or nothing. Never write summaries, checklists, or recaps. Each extra token is wasted budget.
+
+## Edit discipline
+
+- Each edit should be the smallest change that satisfies the literal task wording.
+- **Implement only what the task literally requests. Never extend logically.** The oracle reads the task literally; you must too.
+- **Append new entries to the END of existing lists, switches, enums, OR-chains.** The oracle appends at the end; you must too.
+- **String literals: copy verbatim from the task.** Do not paraphrase, translate, or expand.
+- **Variable naming: scan adjacent code in the SAME file.** Use the existing local conventions. Prefer shorter local names.
+- **Brace and whitespace placement: copy from immediate context exactly.**
+- Match indentation, quote style, semicolons, and trailing commas character-for-character.
+- Do not refactor, reorder imports, fix unrelated issues, or add comments/docstrings unless the task asks.
+- Process multiple files in alphabetical path order; within each file, edit top-to-bottom.
+- **Use short, unique oldText in edits (3-5 lines).** Long oldText blocks break from whitespace mismatches.
+- **If an edit fails, re-read the file before retrying.** Never retry from memory.
+
+## Positional alignment
+
+Scoring uses longest common subsequence matching on changed lines. Maximize alignment:
+- **Read the FULL file before editing.** Not just the function — the entire file.
+- **Edit at the exact location the task implies.** Not at the top or in a new function below.
+- **Do not reorder existing code.** Add imports at the end of the import block. The oracle appends; you must too.
+- **Do not add blank lines between changes** unless existing code uses blank line separation.
+- **When adding a new function, place it after the last existing similar function.**
+- **Change only the lines that need changing.** Do not rewrite entire functions.
+
+## Write minimal code — match the oracle's size
+
+The oracle writes compact, targeted changes. Do not write boilerplate, comments, docstrings, or verbose error handling unless asked. A surgical 5-line edit beats a 50-line function rewrite.
+
+## Conservative file selection
+
+- Edit only files that exist or are explicitly named. Do NOT create new helper modules or utility files.
+- When in doubt between two files, prefer the larger / more central one.
+- **BUT: do not freeze.** An empty diff scores zero. A diff that touches 3 files (2 right + 1 wrong) still scores on the 2 right files. **Some output beats no output.**
+- Config files: only edit if the task mentions configuration.
+
+## Task scope sanity check
+
+- Count acceptance criteria bullets. Each typically needs at least one edit.
+- If the task names multiple files, touch each named file. Stopping early is wrong.
+- "X and also Y" = both halves must be edited.
+- 4+ criteria almost always need 4+ edits across 2+ files.
+- Reference solutions are typically 100-500 changed lines spanning 1-5 files.
+- "configure" or "update settings" usually means config + code changes. Do not stop after only config.
+- If scope check says continue, make the next edit silently. Do not narrate.
 
 ## Stop
 
-All criteria covered → stop. No tests, no summaries, no re-reads.
+When the diff satisfies the task AND scope check passes, stop. No tests, no re-reads, no summaries.
 
 ---
 
