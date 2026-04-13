@@ -1,54 +1,70 @@
-# Scoring Contract — Read This First
+# Diff Scoring Competition
 
-You are running inside the **tau** SWE harness on Bittensor subnet 66. Your output is a unified diff scored as:
+Your unified diff is evaluated against a baseline diff using longest common subsequence matching. The agent with more matched changed lines wins the round.
 
-```
-score = matched_lines / max(your_diff_lines, reference_diff_lines)
-```
+Two ways to lose:
+1. **Extra lines** — editing files or lines the baseline didn't touch inflates your diff with zero-match content.
+2. **Style mismatch** — correct changes with wrong formatting (spaces vs tabs, quote style) won't match.
 
-Matching is **positional and exact** at the line level inside the unified diff. There is no semantic credit, no test execution, no partial credit. Every changed line that does not byte-match the hidden reference at the same diff position is dead weight.
+## Workflow
 
-Two failure modes dominate:
+1. First response must be a tool call. Never start with text.
+2. Run one bash command to locate target files before editing anything.
+3. Read each file completely before making changes.
+4. Apply the smallest edit that satisfies the task literally — nothing more.
+5. Process files alphabetically by path, top-to-bottom within each file.
+6. When done, stop. No summaries, no tests, no re-reads.
 
-1. **Bloat** — you touched lines the reference did not touch, so `your_diff_lines > reference_diff_lines` and the denominator grows.
-2. **Drift** — you touched the right lines but with different whitespace, quotes, naming, or order, so the line at that diff position does not match.
+## Time Pressure
 
-Everything below is a rule for minimizing one of those.
+Budget may be as short as 40 seconds. Never run tests, builds, linters, or type checkers — the sandbox has no running services. Each wasted tool call may cost you the round.
 
-## Operating Loop
+## Finding Files
 
-1. **Read the task once.** Identify the exact files and the exact symbols the task names. Do not infer additional files.
-2. **Read each named file in full** (not partial views, not just the function — whole file). Read no other files.
-3. **Find the smallest possible edit** that satisfies the literal task. The smallest correct patch always beats a larger one.
-4. **Apply the edit** with maximum surrounding-context anchors so the diff lands at the right position.
-5. **Stop.** No verification, no follow-up reads, no summary, no second pass.
+Before your first edit:
+- `find . -type f -name "*.EXT" | grep -v node_modules | grep -v .git | head -40`
+- `grep -r "KEYWORD" --include="*.EXT" -l | head -10`
+One search prevents editing the wrong file, which wastes the entire budget.
 
-## Hard Rules
+## File Selection
 
-- **Minimal diff is the only objective.** If a change is not literally required by the task wording, do not make it.
-- **Match style character-for-character.** Indentation type and width, quote style, semicolons, trailing commas, brace placement, blank-line patterns — copy exactly from the surrounding existing code. Never "normalize."
-- **Do not touch what was not asked.** No comment edits, no docstring edits, no type-annotation edits, no error-handling edits, no logging edits, no import reordering, no unrelated bug fixes, no formatting fixes, no whitespace cleanup, no blank-line insertion or deletion, no rename of any unrelated identifier.
-- **No new files** unless the task literally says "create a file." Editing an existing file is always preferable.
-- **No exploratory reads.** Do not read `README.md`, `package.json`, `tsconfig.json`, test files, or any file the task does not name. Do not run `ls`, `find`, `grep`, `tree`, or any directory scan beyond what is strictly required to locate a named file.
-- **No verification.** Do not run tests, builds, linters, type checkers, or formatters. Do not re-read a file after editing it. Do not "double-check" — every extra tool call is wasted budget that could time out the run.
-- **No commit, no stage, no git operations.** The harness captures your raw diff.
-- **Process order.** When the task requires editing multiple files, process them in alphabetical path order, and inside each file edit top-to-bottom in source order. This stabilizes the diff position so it has a chance to align with the reference.
+- Read the task and identify exactly which files need changes.
+- When uncertain, read the candidate file to verify before editing.
+- Touch only files the baseline would touch. Extra files = pure penalty.
+- But cover ALL files implied by the task — skipping a file loses every potential match in it.
+- If you read a file, edit it. Reading without editing wastes budget.
 
-## Edit Discipline
+## Style Rules
 
-- **Anchor precisely.** When using an edit tool, include enough surrounding context that there is exactly one match — but never more context than needed. Misanchored edits shift diff positions and forfeit the round.
-- **Prefer the narrowest replacement.** If a single token has to change, replace the single token, not the whole line. If a single line has to change, replace that line, not the surrounding block.
-- **Do not collapse or split lines.** If the original is wrapped across two lines, your edit stays wrapped the same way. If the original is one long line, your edit is one long line.
-- **Preserve trailing newlines and EOF behavior** exactly as the original file.
-- **Never re-indent surrounding code** to "make it consistent." Inconsistency is the codebase's, not yours to fix.
+Before editing a file, observe from its first 20 lines:
+- Tabs or spaces? Width?
+- Single or double quotes?
+- Semicolons present?
+- Trailing commas used?
+- Braces on same line or next?
+Every edit must replicate these exactly. One mismatch can prevent line matches.
 
-## Ambiguity Resolution
+## Edit Technique
 
-- When a change is ambiguous between a smaller targeted patch and a larger "more correct" refactor, choose the smaller patch every time.
-- When the task could be read as touching extra files but does not name them, do not touch them.
-- When a fix could include defensive checks that "would be nice," omit them.
-- When you are unsure whether a line should change, leave it.
+- Use the `edit` tool for existing files. `write` only for genuinely new files.
+- Short, unique oldText (3-5 lines). Long blocks break from whitespace differences.
+- If an edit fails, re-read the file before retrying. Never retry from memory.
+- Implement only what the task literally requests. No logical extensions.
+- New entries in lists, switches, enums go at the end.
+- Do not reorder existing code. New imports go at the end of the import block.
+- Do not add blank lines between changes unless existing code does.
 
-## What "Done" Looks Like
+## Scope Verification
 
-You have applied the smallest diff that literally satisfies the task wording. You stop. You do not write a summary. You do not list changes. You do not explain. The harness reads your diff from disk.
+Before stopping, count acceptance criteria bullets. Each typically requires at least one edit.
+- Task names multiple files → edit each one.
+- "X and also Y" → both need changes.
+- 4+ criteria usually need changes in 2+ files.
+- "configure X" often means config file + code that uses it.
+- Under 30 diff lines on a multi-criteria task = probably incomplete.
+
+## Output Rules
+
+- No verification, no re-reads after editing, no explanations.
+- Never produce an empty diff — a partial solution beats nothing.
+- Write compact code. No boilerplate, no defensive checks unless asked.
